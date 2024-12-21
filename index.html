@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cURL to Freshworks Request Template</title>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@v4/dist/crayons/crayons.esm.js"></script>
+  <script nomodule src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@v4/dist/crayons/crayons.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@freshworks/crayons@v4/dist/crayons/crayons.css">
+</head>
+<body>
+  <fw-container>
+    <h1>cURL to Freshworks Request Template</h1>
+    <h2>Enter cURL request:</h2>
+    <fw-textarea id="curlInput" rows="10" cols="50"></fw-textarea>
+    <br><br>
+    <fw-button color="primary" onclick="generateTemplate()">Generate Template</fw-button>
+    <br><br>
+    <h2>Add the request template to configs/requests.json file:</h2>
+    <fw-textarea id="templateOutput" rows="20" cols="50" readonly></fw-textarea>
+    <br><br>
+    <h2>Call the request template from your script file under /app folder:</h2>
+    <fw-textarea id="callTemplate" rows="20" cols="50" readonly></fw-textarea>
+  </fw-container>
+
+  <script>
+    function parseCurlCommand(curlInput) {
+      const curlParts = curlInput.split(' ');
+      let method = 'GET';
+      let url = '';
+      const headers = {};
+      let apiKey = '';
+
+      for (let i = 0; i < curlParts.length; i++) {
+        if (curlParts[i] === '-X') {
+          method = curlParts[i + 1].toUpperCase();
+        } else if (curlParts[i] === '-H') {
+          const header = curlParts[i + 1].split(':');
+          headers[header[0].trim()] = header[1].trim();
+        } else if (curlParts[i] === '-u') {
+          apiKey = curlParts[i + 1].replace(/['"]/g, '').split(':')[0];
+        } else if (curlParts[i].includes('http')) {
+          url = curlParts[i].replace(/['"]/g, '');
+        }
+      }
+
+      return { method, url, headers, apiKey };
+    }
+
+    function parseUrl(url) {
+      if (!url) {
+        throw new Error('Invalid cURL request: URL not found.');
+      }
+      const parsedUrl = new URL(url);
+      const query = {};
+      parsedUrl.searchParams.forEach((value, key) => {
+        query[key] = value;
+      });
+      return { hostname: parsedUrl.hostname, pathname: parsedUrl.pathname, query };
+    }
+
+    function generateSchemaTemplate(method, hostname, pathname, headers, query, apiKey) {
+      return {
+        requestTemplateName: {
+          schema: {
+            method: method,
+            host: hostname,
+            path: pathname,
+            headers: {
+              ...headers,
+              "Authorization": `Basic <%= encode(${apiKey}) %>`,
+              "Content-Type": "application/json"
+            },
+            query: query
+          }
+        }
+      };
+    }
+
+    function callTemplate(){
+      return `client.request.invokeTemplate(requestTemplateName, {
+        context: {},
+        body: JSON.stringify(body)
+      });`
+    }
+
+    function formatOutput(template) {
+      return JSON.stringify(template, null, 2);
+    }
+
+    function generateTemplate() {
+      try {
+        const curlInput = document.getElementById('curlInput').value;
+        const { method, url, headers, apiKey } = parseCurlCommand(curlInput);
+        const { hostname, pathname, query } = parseUrl(url);
+
+        const template = generateSchemaTemplate(method, hostname, pathname, headers, query, apiKey);
+
+        document.getElementById('templateOutput').value = formatOutput(template);
+        document.getElementById('callTemplate').value = callTemplate();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  </script>
+</body>
+</html>
