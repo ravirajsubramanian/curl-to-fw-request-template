@@ -7,6 +7,28 @@
   <script type="module" src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@v4/dist/crayons/crayons.esm.js"></script>
   <script nomodule src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@v4/dist/crayons/crayons.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@freshworks/crayons@v4/dist/crayons/crayons.css">
+  <style>
+    .output-container {
+      position: relative;
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .output-container fw-textarea {
+      width: 600px;  /* Fixed width for textarea */
+    }
+    .copy-icon {
+      margin-top: 4px;
+      padding: 8px;
+      cursor: pointer;
+      background: #f5f5f5;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .copy-icon:hover {
+      background: #e0e0e0;
+    }
+  </style>
 </head>
 <body>
   <fw-container>
@@ -17,34 +39,64 @@
     <fw-button color="primary" onclick="generateTemplate()">Generate Template</fw-button>
     <br><br>
     <h2>Add the request template to configs/requests.json file:</h2>
-    <fw-textarea id="templateOutput" rows="20" cols="50" readonly></fw-textarea>
+    <div class="output-container">
+      <fw-textarea id="templateOutput" rows="20" cols="50" readonly></fw-textarea>
+      <fw-button class="copy-icon" onclick="copyToClipboard('templateOutput')" size="small">
+        📋 Copy
+      </fw-button>
+    </div>
     <br><br>
     <h2>Call the request template from your script file under /app folder:</h2>
-    <fw-textarea id="callTemplate" rows="20" cols="50" readonly></fw-textarea>
+    <div class="output-container">
+      <fw-textarea id="callTemplate" rows="20" cols="50" readonly></fw-textarea>
+      <fw-button class="copy-icon" onclick="copyToClipboard('callTemplate')" size="small">
+        📋 Copy
+      </fw-button>
+    </div>
+    <br><br>
+    <h2>Define the request template in the manifest.json file:</h2>
+    <div class="output-container">
+      <fw-textarea id="manifestOutput" rows="20" cols="50" readonly></fw-textarea>
+      <fw-button class="copy-icon" onclick="copyToClipboard('manifestOutput')" size="small">
+        📋 Copy
+      </fw-button>
+    </div>
+    <p>Change the name of the request template to your desired name for easier readability in all the occurances.</p>
   </fw-container>
 
   <script>
     function parseCurlCommand(curlInput) {
-      const curlParts = curlInput.split(' ');
+      // Split by spaces but preserve content within quotes
+      const parts = curlInput.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
       let method = 'GET';
       let url = '';
       const headers = {};
       let apiKey = '';
+      let body = null;
 
-      for (let i = 0; i < curlParts.length; i++) {
-        if (curlParts[i] === '-X') {
-          method = curlParts[i + 1].toUpperCase();
-        } else if (curlParts[i] === '-H') {
-          const header = curlParts[i + 1].split(':');
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (part === '-X') {
+          method = parts[i + 1].toUpperCase();
+        } else if (part === '-H') {
+          const header = parts[i + 1].replace(/['"]/g, '').split(':');
           headers[header[0].trim()] = header[1].trim();
-        } else if (curlParts[i] === '-u') {
-          apiKey = curlParts[i + 1].replace(/['"]/g, '').split(':')[0];
-        } else if (curlParts[i].includes('http')) {
-          url = curlParts[i].replace(/['"]/g, '');
+        } else if (part === '-u') {
+          apiKey = parts[i + 1].replace(/['"]/g, '').split(':')[0];
+        } else if (part.includes('http')) {
+          url = part.replace(/['"]/g, '');
+        } else if (part === '-d') {
+          try {
+            const jsonStr = parts[i + 1].trim().replace(/^['"]|['"]$/g, '');
+            body = JSON.parse(jsonStr);
+          } catch (e) {
+            console.error('Failed to parse JSON body:', e);
+            body = null;
+          }
         }
       }
 
-      return { method, url, headers, apiKey };
+      return { method, url, headers, apiKey, body };
     }
 
     function parseUrl(url) {
@@ -77,11 +129,37 @@
       };
     }
 
-    function callTemplate(){
-      return `client.request.invokeTemplate(requestTemplateName, {
-        context: {},
-        body: JSON.stringify(body)
-      });`
+    function callTemplate(body) {
+      if (!body) {
+        return `client.request.invokeTemplate(requestTemplateName, {
+          context: {}
+        });`;
+      }
+      return `const body = ${JSON.stringify(body, null, 2)};
+
+client.request.invokeTemplate(requestTemplateName, {
+  context: {},
+  body: JSON.stringify(body)
+});`;
+    }
+
+    function defineTemplate() {
+      return `{
+  "platform-version": "3.0",
+  "modules": {
+    "common": {
+      "location": {
+        ...
+      },
+      "requests": {
+        "requestTemplateName": {},
+      }
+    }
+  },
+  "engines": {
+    ...
+  }
+}`;
     }
 
     function formatOutput(template) {
@@ -91,15 +169,31 @@
     function generateTemplate() {
       try {
         const curlInput = document.getElementById('curlInput').value;
-        const { method, url, headers, apiKey } = parseCurlCommand(curlInput);
+        const { method, url, headers, apiKey, body } = parseCurlCommand(curlInput);
         const { hostname, pathname, query } = parseUrl(url);
 
         const template = generateSchemaTemplate(method, hostname, pathname, headers, query, apiKey);
 
         document.getElementById('templateOutput').value = formatOutput(template);
-        document.getElementById('callTemplate').value = callTemplate();
+        document.getElementById('callTemplate').value = callTemplate(body);
+        document.getElementById('manifestOutput').value = defineTemplate();
       } catch (error) {
         alert(error.message);
+      }
+    }
+
+    async function copyToClipboard(elementId) {
+      const textarea = document.getElementById(elementId);
+      try {
+        await navigator.clipboard.writeText(textarea.value);
+        const button = textarea.nextElementSibling;
+        const originalText = button.textContent;
+        button.textContent = '✓ Copied!';
+        setTimeout(() => {
+          button.textContent = originalText;
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to copy text: ', err);
       }
     }
   </script>
